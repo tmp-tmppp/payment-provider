@@ -1,0 +1,7 @@
+apiVersion: v2
+name: payment-provider
+description: Mock payment provider of Chance (checkout sessions, payouts and signed webhooks), standing in for an external provider.
+type: application
+# Chart version: bump on every change to the chart. The image tag is set by the pipeline (sha-<commit>).
+version: 0.2.0
+appVersion: "0.1.0"

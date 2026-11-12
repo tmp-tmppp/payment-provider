@@ -1,0 +1,20 @@
+# Prod overrides. The pipeline sets the image tag; secrets come from the Secret payment-provider-env
+# (PAYMENT_PROVIDER_ENV): PROVIDER_API_KEY and WEBHOOK_SECRET, each at least 16 characters.
+replicaCount: 1
+
+env:
+  APP_ENV: production
+  LOG_LEVEL: info
+  WEBHOOK_URL: http://payments:8080/v1/webhooks/payment-provider
+  # The public address of the payment pages as the browser sees it (https://<public host>); filled by the deploy
+  # pipeline from the organization variable PUBLIC_HOST (the repo's ci-cd.yml host-values); leave it empty here. The
+  # "url" of every checkout session starts with it. A deploy without it stops at start with "PUBLIC_BASE_URL is
+  # required" instead of sending buyers to localhost.
+  PUBLIC_BASE_URL: ""
+
+resources:
+  requests:
+    cpu: 25m
+    memory: 64Mi
+  limits:
+    memory: 192Mi

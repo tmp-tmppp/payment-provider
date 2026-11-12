@@ -1,0 +1,85 @@
+# Defaults, safe for a local cluster. values-dev.yaml and values-prod.yaml override them; the pipeline sets
+# image.repository and image.tag (sha-<commit>) with --set-string and never puts secrets into values.
+
+image:
+  repository: docker.io/example/payment-provider
+  tag: latest
+  pullPolicy: IfNotPresent
+
+# Exactly one replica, with a Recreate update: the provider keeps its state in memory (values.schema.json allows 1).
+replicaCount: 1
+
+service:
+  port: 8080
+
+# Metrics (REQ-20): GET /metrics is served on a port of its own, never on service.port, so that the gateway can never
+# route it. The port is rendered as METRICS_PORT and as the container port "metrics"; the Pod annotations
+# prometheus.io/scrape, prometheus.io/port and prometheus.io/path tell Prometheus where to scrape. The Service does not
+# expose it.
+metrics:
+  port: 9464
+
+# Further Pod annotations (the prometheus.io ones come from metrics.port); the pipeline adds checksum/app-env so the Pods restart when the Secret changes.
+podAnnotations: {}
+
+# Secret settings (PROVIDER_API_KEY, WEBHOOK_SECRET) come from this Secret as environment variables.
+# The pipeline creates it from the organization secret PAYMENT_PROVIDER_ENV; it is optional so the chart renders without
+# it, but the service refuses to start without both keys (outside APP_ENV=local).
+existingSecret: payment-provider-env
+
+# Non-secret settings, rendered into a ConfigMap (all values are strings). Every key is described in README.md.
+env:
+  APP_ENV: production
+  LOG_LEVEL: info
+  # Where the signed webhooks go: the payments service (public path, the signature is the proof).
+  WEBHOOK_URL: http://payments:8080/v1/webhooks/payment-provider
+  # The public address of the payment pages as the buyer's browser sees it (through the gateway); the "url" of a
+  # checkout session starts with it. In prod the deploy pipeline fills it from the organization variable PUBLIC_HOST
+  # (ci-cd.yml host-values).
+  PUBLIC_BASE_URL: http://localhost:8080
+  CHECKOUT_TTL_MINUTES: "30"
+  PAYOUT_DELAY_MS: "2000"
+  # How many sessions and how many payouts the in-memory store keeps at most (10 000 of each take about 23 MiB of heap).
+  STORE_CAP: "10000"
+  # Drain after SIGTERM: readiness answers 503 and the Pod keeps serving for this long before it closes. It has to fit
+  # into terminationGracePeriodSeconds (30 in the Deployment) together with the 10 seconds a close may take.
+  SHUTDOWN_DELAY_MS: "5000"
+
+resources:
+  requests:
+    cpu: 25m
+    memory: 64Mi
+  limits:
+    memory: 192Mi
+
+probes:
+  startup:
+    path: /health/startup
+    periodSeconds: 2
+    failureThreshold: 30
+  readiness:
+    path: /health/ready
+    periodSeconds: 10
+    failureThreshold: 3
+  liveness:
+    path: /health/live
+    periodSeconds: 10
+    failureThreshold: 3
+
+# Admits the API gateway (the payment page) and the payments pods (the API) to the HTTP port. Needs a network policy
+# engine in the cluster (plan section 9).
+networkPolicy:
+  enabled: false
+  gatewayNamespaceLabels:
+    kubernetes.io/metadata.name: gateway
+  gatewayPodLabels:
+    app.kubernetes.io/name: traefik
+  paymentsPodLabels:
+    app.kubernetes.io/name: payments
+  # The namespace of Prometheus (selected by its kubernetes.io/metadata.name label): admitted on the metrics port only.
+  metrics:
+    namespace: monitoring
+
+# Smoke test run by "helm test" after every deploy: asks the readiness endpoint through the Service.
+smokeTest:
+  image: docker.io/library/busybox:1.38.0@sha256:a46257e06c82ad85242d0d38077d0a52d9896389ca60a1a59d3463db586e5fa4
